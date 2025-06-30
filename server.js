@@ -16,7 +16,7 @@ app.post('/pix', async (req, res) => {
     const response = await fetch('https://api.realtechdev.com.br/v1/transactions', {
       method: 'POST',
       headers: {
-        Authorization: 'Bearer sk_live_01bd360d98336b3fa11068dc8b3e1520',
+        Authorization: 'Bearer sk_live_a12d9256813386a349082bf83fe9c58c',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(req.body),
