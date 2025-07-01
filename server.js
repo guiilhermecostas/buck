@@ -3,47 +3,30 @@ const express = require('express');
 const fetch = require('node-fetch');
 const axios = require('axios');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const TRACKING_FILE = path.join(__dirname, 'tracking.json');
-
-// Carregar tracking salvo
-let trackingStorage = {};
-try {
-  if (fs.existsSync(TRACKING_FILE)) {
-    const rawData = fs.readFileSync(TRACKING_FILE);
-    trackingStorage = JSON.parse(rawData);
-    console.log(`📂 Tracking carregado de ${TRACKING_FILE}`);
-  }
-} catch (err) {
-  console.error('❌ Erro ao ler tracking.json:', err);
-}
-
-// Salvar tracking em arquivo
-function salvarTracking(external_id, tracking) {
-  trackingStorage[external_id] = tracking;
-  fs.writeFile(TRACKING_FILE, JSON.stringify(trackingStorage, null, 2), (err) => {
-    if (err) {
-      console.error('❌ Erro ao salvar tracking:', err);
-    } else {
-      console.log(`💾 Tracking salvo para external_id ${external_id}`);
-    }
-  });
-}
-
 // Endpoint para gerar pagamento Pix
-app.post('/pix', async (req, res) => {
+app.post('/pix', async (req, res) => { 
   console.log('📦 Body recebido do front:', req.body);
 
   try {
     const { external_id, payment_method, amount, buyer, tracking } = req.body;
 
-    if (external_id && tracking) salvarTracking(external_id, tracking);
+    if (external_id && tracking) {
+      const { error } = await supabase.from('trackings').upsert({
+        external_id,
+        tracking
+      });
+
+      if (error) console.error('❌ Erro ao salvar tracking no Supabase:', error);
+      else console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`);
+    }
 
     const payloadRealTech = {
       external_id,
@@ -78,12 +61,22 @@ app.post('/webhook', async (req, res) => {
   const { event, data } = req.body;
   if (!data) return res.status(400).send('Payload inválido');
 
-  const trackingFromFile = data.external_id ? trackingStorage[data.external_id] : null;
-  if (trackingFromFile) {
-    data.tracking = trackingFromFile;
-    console.log(`🔍 Tracking recuperado de arquivo para external_id ${data.external_id}:`, trackingFromFile);
-  } else {
-    console.log('⚠️ Tracking não encontrado no arquivo, usando o que veio (provavelmente null)');
+  let trackingFromDb = null;
+
+  if (data.external_id) {
+    const { data: trackingRow, error } = await supabase
+      .from('trackings')
+      .select('tracking')
+      .eq('external_id', data.external_id)
+      .single();
+
+    if (error) {
+      console.warn('⚠️ Tracking não encontrado no Supabase:', error.message);
+    } else {
+      trackingFromDb = trackingRow?.tracking;
+      data.tracking = trackingFromDb;
+      console.log(`🔍 Tracking recuperado do Supabase para external_id ${data.external_id}:`, trackingFromDb);
+    }
   }
 
   const valor = data.total_amount || 0;
@@ -94,7 +87,7 @@ app.post('/webhook', async (req, res) => {
       'Pagamento criado',
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
-    await enviarEventoUtmify(data, 'paid');
+    await enviarEventoUtmify(data, 'waiting_payment');
   }
 
   if (event === 'transaction.processed' && data.status === 'paid') {
