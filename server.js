@@ -13,6 +13,16 @@ app.use(express.json());
 app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
   try {
+    // Extrair somente os campos aceitos pela RealTech
+    const { external_id, payment_method, amount, buyer } = req.body;
+
+    const payloadRealTech = {
+      external_id,
+      payment_method,
+      amount,
+      buyer
+    };
+
     const response = await fetch('https://api.realtechdev.com.br/v1/transactions', {
       method: 'POST',
       headers: {
@@ -20,7 +30,7 @@ app.post('/pix', async (req, res) => {
         'Content-Type': 'application/json',
         'User-Agent': 'Buckpay API'
       },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify(payloadRealTech)
     });
 
     const data = await response.json();
