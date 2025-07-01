@@ -31,28 +31,38 @@ app.post('/pix', async (req, res) => {
   }
 });
 
-// ✅ Novo endpoint para receber webhooks
+// Endpoint para receber webhooks e disparar Pushcut
 app.post('/webhook', async (req, res) => {
+  console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
+
   const { event, data } = req.body;
-  console.log('📩 Webhook recebido:', event, data);
 
   let pushcutUrl = null;
 
   if (event === 'transaction.created') {
     pushcutUrl = 'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/CheckoutFy%20Gerou';
-  } else if (event === 'transaction.processed') {
+  } else if (event === 'transaction.processed' && data.status === 'paid') {
     pushcutUrl = 'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/Aprovado';
   }
 
   if (pushcutUrl) {
     try {
-      const response = await fetch(pushcutUrl, { method: 'POST' });
+      const response = await fetch(pushcutUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: 'Notificação',
+          text: `Evento: ${event} | Status: ${data.status} | ID: ${data.id}`
+        })
+      });
       console.log(`🚀 Pushcut enviado: ${pushcutUrl} - status: ${response.status}`);
     } catch (error) {
       console.error('❌ Erro ao enviar Pushcut:', error);
     }
   } else {
-    console.log('⚠️ Evento não tratado:', event);
+    console.log('⚠️ Evento não tratado ou sem pushcut:', event);
   }
 
   res.status(200).send('Webhook recebido');
