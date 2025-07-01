@@ -1,30 +1,49 @@
 require('dotenv').config();
-
 const express = require('express');
 const fetch = require('node-fetch');
 const axios = require('axios');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Armazenamento temporário em memória do tracking indexado por external_id
-const trackingStorage = {};
+const TRACKING_FILE = path.join(__dirname, 'tracking.json');
+
+// Carregar tracking salvo
+let trackingStorage = {};
+try {
+  if (fs.existsSync(TRACKING_FILE)) {
+    const rawData = fs.readFileSync(TRACKING_FILE);
+    trackingStorage = JSON.parse(rawData);
+    console.log(`📂 Tracking carregado de ${TRACKING_FILE}`);
+  }
+} catch (err) {
+  console.error('❌ Erro ao ler tracking.json:', err);
+}
+
+// Salvar tracking em arquivo
+function salvarTracking(external_id, tracking) {
+  trackingStorage[external_id] = tracking;
+  fs.writeFile(TRACKING_FILE, JSON.stringify(trackingStorage, null, 2), (err) => {
+    if (err) {
+      console.error('❌ Erro ao salvar tracking:', err);
+    } else {
+      console.log(`💾 Tracking salvo para external_id ${external_id}`);
+    }
+  });
+}
 
 // Endpoint para gerar pagamento Pix
 app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
 
   try {
-    // Extrair os campos aceitos pela RealTech
     const { external_id, payment_method, amount, buyer, tracking } = req.body;
 
-    // Salvar o tracking localmente para uso futuro (ex: no webhook)
-    if (external_id && tracking) {
-      trackingStorage[external_id] = tracking;
-      console.log(`💾 Tracking salvo para external_id ${external_id}`);
-    }
+    if (external_id && tracking) salvarTracking(external_id, tracking);
 
     const payloadRealTech = {
       external_id,
@@ -52,22 +71,19 @@ app.post('/pix', async (req, res) => {
   }
 });
 
-// Endpoint para receber webhooks e disparar Pushcut
+// Webhook
 app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
 
   const { event, data } = req.body;
   if (!data) return res.status(400).send('Payload inválido');
 
-  // Recuperar tracking salvo localmente pelo external_id (se existir)
-  const trackingFromStorage = data.external_id ? trackingStorage[data.external_id] : null;
-
-  // Substituir o tracking do webhook pelo que foi salvo localmente
-  if (trackingFromStorage) {
-    data.tracking = trackingFromStorage;
-    console.log(`🔍 Tracking recuperado do armazenamento para external_id ${data.external_id}:`, trackingFromStorage);
+  const trackingFromFile = data.external_id ? trackingStorage[data.external_id] : null;
+  if (trackingFromFile) {
+    data.tracking = trackingFromFile;
+    console.log(`🔍 Tracking recuperado de arquivo para external_id ${data.external_id}:`, trackingFromFile);
   } else {
-    console.log('⚠️ Tracking não encontrado no armazenamento local, usando dados do webhook (provavelmente null)');
+    console.log('⚠️ Tracking não encontrado no arquivo, usando o que veio (provavelmente null)');
   }
 
   const valor = data.total_amount || 0;
@@ -78,7 +94,6 @@ app.post('/webhook', async (req, res) => {
       'Pagamento criado',
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
-
     await enviarEventoUtmify(data, 'waiting_payment');
   }
 
@@ -88,14 +103,13 @@ app.post('/webhook', async (req, res) => {
       'Pagamento aprovado',
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
-
     await enviarEventoUtmify(data, 'paid');
   }
 
   res.status(200).send('Webhook recebido');
 });
 
-// Função Pushcut e UTMify seguem iguais
+// Pushcut
 async function sendPushcutNotification(url, title, text) {
   try {
     const response = await fetch(url, {
@@ -110,6 +124,7 @@ async function sendPushcutNotification(url, title, text) {
   }
 }
 
+// UTMify
 async function enviarEventoUtmify(data, status) {
   try {
     const payload = {
