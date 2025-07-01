@@ -3,9 +3,13 @@ const express = require('express');
 const fetch = require('node-fetch');
 const axios = require('axios');
 const cors = require('cors');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+const FB_PIXEL_ID = process.env.FB_PIXEL_ID;
+const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
 
 const app = express();
 app.use(cors());
@@ -26,6 +30,54 @@ function limparTracking(tracking) {
       content: utm.content || 'default_content'
     }
   };
+}
+
+// Hash SHA256 para e-mail (recomendado pelo Facebook para user_data)
+function hashSHA256(str) {
+  return crypto.createHash('sha256').update(str.trim().toLowerCase()).digest('hex');
+}
+
+// Função para enviar evento para Facebook Conversion API
+async function enviarEventoFacebook(eventName, data) {
+  if (!FB_PIXEL_ID || !FB_ACCESS_TOKEN) {
+    console.warn('⚠️ Facebook Pixel ID ou Access Token não configurados.');
+    return;
+  }
+
+  const url = `https://graph.facebook.com/v17.0/${FB_PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
+
+  const eventData = {
+    data: [
+      {
+        event_name: eventName,
+        event_time: Math.floor(Date.now() / 1000),
+        action_source: 'website',
+        event_id: data.id,
+        user_data: {
+          // Hash do e-mail se existir
+          em: data.buyer?.email ? hashSHA256(data.buyer.email) : undefined,
+          // Você pode incluir outros dados de user_data se quiser (telefone, ip, etc)
+        },
+        custom_data: {
+          currency: 'BRL',
+          value: (data.total_amount || 0) / 100
+        }
+      }
+    ],
+    // test_event_code: process.env.FB_TEST_EVENT_CODE || undefined // opcional para ambiente de testes
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify(eventData),
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const json = await response.json();
+    console.log(`✅ Evento Facebook ${eventName} enviado:`, json);
+  } catch (error) {
+    console.error(`❌ Erro ao enviar evento Facebook ${eventName}:`, error);
+  }
 }
 
 // Endpoint para gerar pagamento Pix
@@ -58,7 +110,6 @@ app.post('/pix', async (req, res) => {
     // Salvar tracking + transaction_id no Supabase
     if (external_id && tracking && data?.id) {
       const trackingLimpo = limparTracking(tracking);
-
       const { error } = await supabase.from('trackings').upsert({
         external_id,
         transaction_id: data.id,
@@ -128,6 +179,7 @@ app.post('/webhook', async (req, res) => {
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
     await enviarEventoUtmify(data, 'waiting_payment');
+    await enviarEventoFacebook('InitiateCheckout', data); // Dispara evento InitiateCheckout no Facebook
   }
 
   if (event === 'transaction.processed' && data.status === 'paid') {
@@ -137,6 +189,7 @@ app.post('/webhook', async (req, res) => {
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
     await enviarEventoUtmify(data, 'paid');
+    await enviarEventoFacebook('Purchase', data); // Dispara evento Purchase no Facebook
   }
 
   res.status(200).send('Webhook recebido');
