@@ -9,12 +9,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Armazenamento temporário em memória do tracking indexado por external_id
+const trackingStorage = {};
+
 // Endpoint para gerar pagamento Pix
 app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
+
   try {
-    // Extrair somente os campos aceitos pela RealTech
-    const { external_id, payment_method, amount, buyer } = req.body;
+    // Extrair os campos aceitos pela RealTech
+    const { external_id, payment_method, amount, buyer, tracking } = req.body;
+
+    // Salvar o tracking localmente para uso futuro (ex: no webhook)
+    if (external_id && tracking) {
+      trackingStorage[external_id] = tracking;
+      console.log(`💾 Tracking salvo para external_id ${external_id}`);
+    }
 
     const payloadRealTech = {
       external_id,
@@ -47,12 +57,21 @@ app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
 
   const { event, data } = req.body;
-
   if (!data) return res.status(400).send('Payload inválido');
+
+  // Recuperar tracking salvo localmente pelo external_id (se existir)
+  const trackingFromStorage = data.external_id ? trackingStorage[data.external_id] : null;
+
+  // Substituir o tracking do webhook pelo que foi salvo localmente
+  if (trackingFromStorage) {
+    data.tracking = trackingFromStorage;
+    console.log(`🔍 Tracking recuperado do armazenamento para external_id ${data.external_id}:`, trackingFromStorage);
+  } else {
+    console.log('⚠️ Tracking não encontrado no armazenamento local, usando dados do webhook (provavelmente null)');
+  }
 
   const valor = data.total_amount || 0;
 
-  // Disparar Pushcut + UTMify quando criado (pendente)
   if (event === 'transaction.created' && data.status === 'pending') {
     await sendPushcutNotification(
       'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/CheckoutFy%20Gerou',
@@ -63,7 +82,6 @@ app.post('/webhook', async (req, res) => {
     await enviarEventoUtmify(data, 'waiting_payment');
   }
 
-  // Disparar Pushcut + UTMify quando pago
   if (event === 'transaction.processed' && data.status === 'paid') {
     await sendPushcutNotification(
       'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/Aprovado',
@@ -77,6 +95,7 @@ app.post('/webhook', async (req, res) => {
   res.status(200).send('Webhook recebido');
 });
 
+// Função Pushcut e UTMify seguem iguais
 async function sendPushcutNotification(url, title, text) {
   try {
     const response = await fetch(url, {
@@ -91,7 +110,6 @@ async function sendPushcutNotification(url, title, text) {
   }
 }
 
-// Enviar evento para a UTMify
 async function enviarEventoUtmify(data, status) {
   try {
     const payload = {
@@ -134,32 +152,13 @@ async function enviarEventoUtmify(data, status) {
     const response = await axios.post("https://api.utmify.com.br/api-credentials/orders", payload, {
       headers: {
         "Content-Type": "application/json",
-        "x-api-token": process.env.UTMIFY_API_KEY // Coloque isso no seu .env
+        "x-api-token": process.env.UTMIFY_API_KEY
       }
     });
 
     console.log(`✅ Evento ${status} enviado à UTMify:`, response.status);
   } catch (error) {
     console.error(`❌ Erro ao enviar evento ${status} para UTMify:`, error.message);
-  }
-}
-
-// Função reutilizável para disparar Pushcut
-async function sendPushcutNotification(url, title, text) {
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ title, text })
-    });
-
-    const responseText = await response.text();
-    console.log(`🚀 Pushcut enviado para ${url}`);
-    console.log(`📤 Status: ${response.status} - Resposta: ${responseText}`);
-  } catch (error) {
-    console.error('❌ Erro ao enviar Pushcut:', error);
   }
 }
 
