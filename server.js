@@ -120,6 +120,8 @@ async function sendPushcutNotification(url, title, text) {
 // UTMify
 async function enviarEventoUtmify(data, status) {
   try {
+    const utm = data.tracking?.utm || {};
+
     const payload = {
       orderId: data.id,
       platform: "checkoutfy",
@@ -134,11 +136,11 @@ async function enviarEventoUtmify(data, status) {
         document: data.buyer?.document || ''
       },
       trackingParameters: {
-        utm_campaign: data.tracking?.utm?.campaign || '',
-        utm_content: data.tracking?.utm?.content || '',
-        utm_medium: data.tracking?.utm?.medium || '',
-        utm_source: data.tracking?.utm?.source || '',
-        utm_term: data.tracking?.utm?.term || ''
+        utm_campaign: utm.campaign || '',
+        utm_content: utm.content || '',
+        utm_medium: utm.medium || '',
+        utm_source: utm.source || '',
+        utm_term: utm.term || ''
       },
       commission: {
         totalPriceInCents: data.total_amount || 0,
