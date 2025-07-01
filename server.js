@@ -18,16 +18,6 @@ app.post('/pix', async (req, res) => {
   try {
     const { external_id, payment_method, amount, buyer, tracking } = req.body;
 
-    if (external_id && tracking) {
-      const { error } = await supabase.from('trackings').upsert({
-        external_id,
-        tracking
-      });
-
-      if (error) console.error('❌ Erro ao salvar tracking no Supabase:', error);
-      else console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`);
-    }
-
     const payloadRealTech = {
       external_id,
       payment_method,
@@ -47,6 +37,18 @@ app.post('/pix', async (req, res) => {
 
     const data = await response.json();
     console.log('✅ Resposta da RealTechDev:', response.status, data);
+
+    // Salvar tracking + transaction_id no Supabase
+    if (external_id && tracking && data?.id) {
+      const { error } = await supabase.from('trackings').upsert({
+        external_id,
+        transaction_id: data.id,
+        tracking
+      });
+      if (error) console.error('❌ Erro ao salvar tracking no Supabase:', error);
+      else console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`);
+    }
+
     res.status(response.status).json(data);
   } catch (err) {
     console.error('❌ Erro no fetch da RealTechDev:', err);
@@ -61,6 +63,8 @@ app.post('/webhook', async (req, res) => {
   const { event, data } = req.body;
   if (!data) return res.status(400).send('Payload inválido');
 
+  console.log('🔍 External ID recebido no webhook:', data.external_id);
+
   let trackingFromDb = null;
 
   if (data.external_id) {
@@ -70,13 +74,29 @@ app.post('/webhook', async (req, res) => {
       .eq('external_id', data.external_id)
       .single();
 
-    if (error) {
-      console.warn('⚠️ Tracking não encontrado no Supabase:', error.message);
-    } else {
-      trackingFromDb = trackingRow?.tracking;
-      data.tracking = trackingFromDb;
-      console.log(`🔍 Tracking recuperado do Supabase para external_id ${data.external_id}:`, trackingFromDb);
+    if (!error && trackingRow) {
+      trackingFromDb = trackingRow.tracking;
     }
+  }
+
+  if (!trackingFromDb && data.id) {
+    const { data: trackingRowById, error: errorById } = await supabase
+      .from('trackings')
+      .select('tracking')
+      .eq('transaction_id', data.id)
+      .single();
+
+    if (!errorById && trackingRowById) {
+      trackingFromDb = trackingRowById.tracking;
+      console.log(`🔁 Tracking carregado por ID da transação:`, trackingFromDb);
+    }
+  }
+
+  if (trackingFromDb) {
+    data.tracking = trackingFromDb;
+    console.log('✅ Tracking restaurado para o webhook');
+  } else {
+    console.warn('⚠️ Nenhum tracking encontrado para o webhook');
   }
 
   const valor = data.total_amount || 0;
