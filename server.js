@@ -42,8 +42,8 @@ app.post('/webhook', async (req, res) => {
     // Pagamento gerado
     await sendPushcutNotification(
       'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/CheckoutFy%20Gerou',
-      'Pagamento criado',
-      `ID: ${data.id} | Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
+      'Criado',
+      `Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
     );
   }
 
@@ -51,8 +51,8 @@ app.post('/webhook', async (req, res) => {
     // Pagamento concluído
     await sendPushcutNotification(
       'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/Aprovado',
-      'Pagamento aprovado',
-      `ID: ${data.id} | Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
+      'Aprovado',
+      `Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
     );
   }
 
