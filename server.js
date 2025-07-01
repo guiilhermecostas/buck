@@ -136,11 +136,11 @@ async function enviarEventoUtmify(data, status) {
         document: data.buyer?.document || ''
       },
       trackingParameters: {
-        utm_campaign: utm.campaign || '',
-        utm_content: utm.content || '',
+        utm_term: utm.term || '',
         utm_medium: utm.medium || '',
         utm_source: utm.source || '',
-        utm_term: utm.term || ''
+        utm_content: utm.content || '',
+        utm_campaign: utm.campaign || ''
       },
       commission: {
         totalPriceInCents: data.total_amount || 0,
