@@ -11,6 +11,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 🔧 Função para garantir valores padrão no tracking
+function limparTracking(tracking) {
+  const utm = tracking?.utm || {};
+  return {
+    ref: tracking?.ref || 'default_ref',
+    src: tracking?.src || 'default_src',
+    sck: tracking?.sck || 'default_sck',
+    utm: {
+      source: utm.source || 'default_source',
+      medium: utm.medium || 'default_medium',
+      campaign: utm.campaign || 'default_campaign',
+      term: utm.term || 'default_term',
+      content: utm.content || 'default_content'
+    }
+  };
+}
+
 // Endpoint para gerar pagamento Pix
 app.post('/pix', async (req, res) => { 
   console.log('📦 Body recebido do front:', req.body);
@@ -40,11 +57,14 @@ app.post('/pix', async (req, res) => {
 
     // Salvar tracking + transaction_id no Supabase
     if (external_id && tracking && data?.id) {
+      const trackingLimpo = limparTracking(tracking);
+
       const { error } = await supabase.from('trackings').upsert({
         external_id,
         transaction_id: data.id,
-        tracking
+        tracking: trackingLimpo
       });
+
       if (error) console.error('❌ Erro ao salvar tracking no Supabase:', error);
       else console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`);
     }
