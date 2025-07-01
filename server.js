@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const fetch = require('node-fetch');
+const axios = require('axios');
 const cors = require('cors');
 
 const app = express();
@@ -37,27 +38,101 @@ app.post('/webhook', async (req, res) => {
 
   const { event, data } = req.body;
 
-  // Verificação dupla: tipo de evento + status
+  if (!data) return res.status(400).send('Payload inválido');
+
+  const valor = data.total_amount || 0;
+
+  // Disparar Pushcut + UTMify quando criado (pendente)
   if (event === 'transaction.created' && data.status === 'pending') {
-    // Pagamento gerado
     await sendPushcutNotification(
       'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/CheckoutFy%20Gerou',
-      'Criado',
-      `Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
+      'Pagamento criado',
+      `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
+
+    await enviarEventoUtmify(data, 'waiting_payment');
   }
 
+  // Disparar Pushcut + UTMify quando pago
   if (event === 'transaction.processed' && data.status === 'paid') {
-    // Pagamento concluído
     await sendPushcutNotification(
       'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/Aprovado',
-      'Aprovado',
-      `Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
+      'Pagamento aprovado',
+      `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
+
+    await enviarEventoUtmify(data, 'paid');
   }
 
   res.status(200).send('Webhook recebido');
 });
+
+async function sendPushcutNotification(url, title, text) {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, text })
+    });
+    const txt = await response.text();
+    console.log(`🚀 Pushcut: ${response.status} - ${txt}`);
+  } catch (err) {
+    console.error('❌ Erro no Pushcut:', err);
+  }
+}
+
+// Enviar evento para a UTMify
+async function enviarEventoUtmify(data, status) {
+  try {
+    const payload = {
+      orderId: data.id,
+      platform: "checkoutfy",
+      paymentMethod: data.payment_method || 'pix',
+      status: status,
+      createdAt: new Date(data.created_at || Date.now()).toISOString(),
+      approvedDate: new Date().toISOString(),
+      customer: {
+        name: data.buyer?.name || 'Sem nome',
+        email: data.buyer?.email || 'sememail@email.com',
+        phone: data.buyer?.phone || '',
+        document: data.buyer?.document || ''
+      },
+      trackingParameters: {
+        utm_campaign: data.tracking?.utm?.campaign || '',
+        utm_content: data.tracking?.utm?.content || '',
+        utm_medium: data.tracking?.utm?.medium || '',
+        utm_source: data.tracking?.utm?.source || '',
+        utm_term: data.tracking?.utm?.term || ''
+      },
+      commission: {
+        totalPriceInCents: data.total_amount || 0,
+        gatewayFeeInCents: 300,
+        userCommissionInCents: data.total_amount || 0
+      },
+      products: [
+        {
+          id: "produto1",
+          name: data.offer?.name || 'Produto',
+          planId: "plano123",
+          planName: "Plano VIP",
+          quantity: data.offer?.quantity || 1,
+          priceInCents: data.total_amount || 0
+        }
+      ]
+    };
+
+    const response = await axios.post("https://api.utmify.com.br/api-credentials/orders", payload, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-token": process.env.UTMIFY_API_KEY // Coloque isso no seu .env
+      }
+    });
+
+    console.log(`✅ Evento ${status} enviado à UTMify:`, response.status);
+  } catch (error) {
+    console.error(`❌ Erro ao enviar evento ${status} para UTMify:`, error.message);
+  }
+}
 
 // Função reutilizável para disparar Pushcut
 async function sendPushcutNotification(url, title, text) {
