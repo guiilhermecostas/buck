@@ -37,35 +37,45 @@ app.post('/webhook', async (req, res) => {
 
   const { event, data } = req.body;
 
-  let pushcutUrl = null;
-
-  if (event === 'transaction.created') {
-    pushcutUrl = 'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/CheckoutFy%20Gerou';
-  } else if (event === 'transaction.processed' && data.status === 'paid') {
-    pushcutUrl = 'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/Aprovado';
+  // Verificação dupla: tipo de evento + status
+  if (event === 'transaction.created' && data.status === 'pending') {
+    // Pagamento gerado
+    await sendPushcutNotification(
+      'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/CheckoutFy%20Gerou',
+      'Pagamento criado',
+      `ID: ${data.id} | Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
+    );
   }
 
-  if (pushcutUrl) {
-    try {
-      const response = await fetch(pushcutUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          title: 'Notificação',
-          text: `Evento: ${event} | Status: ${data.status} | ID: ${data.id}`
-        })
-      });
-      console.log(`🚀 Pushcut enviado: ${pushcutUrl} - status: ${response.status}`);
-    } catch (error) {
-      console.error('❌ Erro ao enviar Pushcut:', error);
-    }
-  } else {
-    console.log('⚠️ Evento não tratado ou sem pushcut:', event);
+  if (event === 'transaction.processed' && data.status === 'paid') {
+    // Pagamento concluído
+    await sendPushcutNotification(
+      'https://api.pushcut.io/U-9R4KGCR6y075x0NYKk7/notifications/Aprovado',
+      'Pagamento aprovado',
+      `ID: ${data.id} | Valor: R$ ${(data.total_amount / 100).toFixed(2)}`
+    );
   }
 
   res.status(200).send('Webhook recebido');
 });
+
+// Função reutilizável para disparar Pushcut
+async function sendPushcutNotification(url, title, text) {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ title, text })
+    });
+
+    const responseText = await response.text();
+    console.log(`🚀 Pushcut enviado para ${url}`);
+    console.log(`📤 Status: ${response.status} - Resposta: ${responseText}`);
+  } catch (error) {
+    console.error('❌ Erro ao enviar Pushcut:', error);
+  }
+}
 
 app.listen(3000, () => console.log('🚀 Servidor rodando em http://localhost:3000'));
