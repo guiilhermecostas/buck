@@ -6,129 +6,184 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
+const port = 3001;
+
 app.use(cors());
 app.use(express.json());
 
+// Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-const API_PIX = 'https://api.realtechdev.com.br/v1/transactions';
-const API_TOKEN = process.env.REALTECH_TOKEN;
+// UTMify
+const UTMIFY_API = 'https://utmify.io/api/event';
+const UTMIFY_KEY = process.env.UTMIFY_API_KEY;
 
-// 🔁 Função para limpar tracking
-function limparTracking(tracking) {
-  return {
-    ref: tracking?.ref || null,
-    src: tracking?.src || null,
-    sck: tracking?.sck || null,
-    utm: {
-      source: tracking?.utm?.source || null,
-      medium: tracking?.utm?.medium || null,
-      campaign: tracking?.utm?.campaign || null,
-      id: tracking?.utm?.id || null,
-      term: tracking?.utm?.term || null,
-      content: tracking?.utm?.content || null
-    }
-  };
-}
+// Facebook
+const FB_PIXEL_ID = process.env.FB_PIXEL_ID;
+const FB_TOKEN = process.env.FB_TOKEN;
 
-// ✅ ROTA PARA CRIAR PIX
-app.post('/pix', async (req, res) => {
+// Endpoint para gerar pagamento
+app.post('/gerar-pagamento', async (req, res) => {
+  const { external_id, payment_method, amount, buyer, tracking } = req.body;
+
   try {
-    const body = req.body;
-    console.log('📦 Body recebido do front:', body);
+    const response = await axios.post(
+      'https://api.realtechdev.com.br/v1/transactions',
+      {
+        external_id,
+        payment_method,
+        amount,
+        buyer,
+        tracking
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.REALTECH_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
-    const trackingLimpo = limparTracking(body.tracking);
+    const transaction = response.data.data;
+    const transaction_id = transaction.id;
 
-    const response = await axios.post(API_PIX, {
-      external_id: body.external_id,
-      payment_method: body.payment_method,
-      amount: body.amount,
-      buyer: body.buyer,
+    console.log('📦 Body recebido do front:', req.body);
+    console.log('✅ Resposta da RealTechDev:', response.status, response.data);
+
+    // SALVA NO SUPABASE
+    const { error: insertError } = await supabase.from('trackings').insert([
+      {
+        transaction_id: transaction_id,
+        external_id: external_id,
+        buyer_name: buyer.name,
+        buyer_email: buyer.email,
+        ref: tracking.ref || 'default_ref',
+        src: tracking.src || 'default_src',
+        sck: tracking.sck || 'default_sck',
+        utm_source: tracking.utm?.source || '',
+        utm_medium: tracking.utm?.medium || '',
+        utm_campaign: tracking.utm?.campaign || '',
+        utm_id: tracking.utm?.id || '',
+        utm_term: tracking.utm?.term || '',
+        utm_content: tracking.utm?.content || ''
+      }
+    ]);
+
+    if (insertError) {
+      console.error('❌ Erro ao salvar no Supabase:', insertError.message);
+    } else {
+      console.log('✅ Tracking salvo no Supabase com sucesso.');
+    }
+
+    res.json(transaction);
+  } catch (error) {
+    console.error('❌ Erro ao gerar pagamento:', error.message);
+    res.status(500).json({ error: 'Erro ao gerar pagamento' });
+  }
+});
+
+// Webhook para receber notificações
+app.post('/webhook', async (req, res) => {
+  const { event, data } = req.body;
+
+  const transactionId = data?.id;
+  console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
+  console.log('🔍 Transaction ID recebido no webhook:', transactionId);
+
+  if (!transactionId) {
+    console.warn('⚠️ Nenhum transaction_id no webhook.');
+    return res.sendStatus(200);
+  }
+
+  // BUSCA tracking no Supabase
+  const { data: trackingData, error } = await supabase
+    .from('trackings')
+    .select('*')
+    .eq('transaction_id', transactionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('❌ Erro ao buscar tracking no Supabase:', error.message);
+    return res.sendStatus(200);
+  }
+
+  if (!trackingData) {
+    console.warn('⚠️ Não encontrou tracking para transaction_id no banco');
+  }
+
+  // ENVIA PARA UTMIFY
+  try {
+    await axios.post(UTMIFY_API, {
+      event: 'waiting_payment',
+      utm: {
+        source: trackingData?.utm_source,
+        medium: trackingData?.utm_medium,
+        campaign: trackingData?.utm_campaign,
+        id: trackingData?.utm_id,
+        term: trackingData?.utm_term,
+        content: trackingData?.utm_content
+      },
+      ref: trackingData?.ref,
+      src: trackingData?.src,
+      sck: trackingData?.sck
     }, {
       headers: {
-        Authorization: `Bearer ${API_TOKEN}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${UTMIFY_KEY}`
       }
     });
-
-    const result = response.data;
-    console.log('✅ Resposta da RealTechDev:', result);
-
-    // 🧠 Salvar no Supabase com transaction_id
-    await supabase.from('trackings').upsert({
-      external_id: body.external_id,
-      transaction_id: result.data.id,
-      tracking: trackingLimpo
-    });
-
-    return res.json(result);
+    console.log('✅ Evento waiting_payment enviado à UTMify');
   } catch (err) {
-    console.error('❌ Erro ao criar Pix:', err.response?.data || err.message);
-    return res.status(500).json({ error: 'Erro ao gerar Pix' });
+    console.error('❌ Erro ao enviar para UTMify:', err.message);
   }
-});
 
-// ✅ ROTA PARA WEBHOOK
-app.post('/webhook', async (req, res) => {
+  // ENVIA PARA FACEBOOK
   try {
-    const { event, data } = req.body;
-    console.log('📩 Webhook recebido:', req.body);
-
-    const transaction_id = data.id;
-    console.log('🔍 Transaction ID recebido no webhook:', transaction_id);
-
-    // 🔎 Buscar no Supabase pelo transaction_id
-    const { data: trackingData } = await supabase
-      .from('trackings')
-      .select('tracking')
-      .eq('transaction_id', transaction_id)
-      .single();
-
-    if (!trackingData) {
-      console.warn('⚠️ Não encontrou tracking para transaction_id no banco');
-    }
-
-    // 🔄 Enviar eventos para UTMify ou outro lugar (exemplo)
-    if (trackingData?.tracking) {
-      const tracking = trackingData.tracking;
-
-      // 🔗 Envio para UTMify (se quiser)
-      await axios.post('https://app.utmify.com.br/tracking/v1/events', {
-        event: 'waiting_payment',
-        transaction_id: transaction_id,
-        tracking
-      });
-      console.log('✅ Evento waiting_payment enviado à UTMify');
-    }
-
-    // ✅ Enviar para Pixel do Facebook (exemplo)
-    await axios.post(`https://graph.facebook.com/v17.0/${process.env.FB_PIXEL_ID}/events`, {
-      event_name: 'InitiateCheckout',
-      event_time: Math.floor(Date.now() / 1000),
-      action_source: 'website',
-      event_source_url: 'https://ajudeana.com.br/',
-      user_data: {},
-      custom_data: {
-        currency: 'BRL',
-        value: data.total_amount / 100,
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${FB_PIXEL_ID}/events?access_token=${FB_TOKEN}`,
+      {
+        data: [
+          {
+            event_name: 'InitiateCheckout',
+            event_time: Math.floor(Date.now() / 1000),
+            action_source: 'website',
+            event_source_url: 'https://ajudeana.com.br/',
+            user_data: {
+              em: [hashEmail(data?.buyer?.email)]
+            }
+          }
+        ]
       }
+    );
+    console.log('✅ Evento Facebook InitiateCheckout enviado');
+  } catch (err) {
+    console.error('❌ Erro ao enviar para o Facebook:', err.message);
+  }
+
+  // PUSHCUT (opcional)
+  try {
+    await axios.post('https://api.pushcut.io/v1/notifications/Doação Recebida', {
+      text: `Doação pendente: R$ ${(data.total_amount / 100).toFixed(2)}`
     }, {
-      params: {
-        access_token: process.env.FB_ACCESS_TOKEN
+      headers: {
+        Authorization: `Bearer ${process.env.PUSHCUT_KEY}`
       }
     });
-    console.log('✅ Evento Facebook InitiateCheckout enviado');
-
-    res.status(200).json({ ok: true });
+    console.log('🚀 Pushcut enviado');
   } catch (err) {
-    console.error('❌ Erro no webhook:', err.message);
-    res.status(500).json({ error: 'Erro interno no webhook' });
+    console.warn('⚠️ Pushcut falhou:', err.message);
   }
+
+  res.sendStatus(200);
 });
 
-// ✅ Iniciar servidor
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
+// Função de hash do e-mail (SHA256 base64 sem padding)
+const crypto = require('crypto');
+function hashEmail(email) {
+  if (!email) return '';
+  const hash = crypto.createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+  return hash;
+}
+
+app.listen(port, () => {
+  console.log(`🚀 Servidor rodando em http://localhost:${port}`);
 });
- 
