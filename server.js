@@ -176,8 +176,8 @@ app.post('/pix', async (req, res) => {
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
     // Salvar tracking + buyer + transaction_id no Supabase
-    if (external_id && tracking && data?.id) {
-      const trackingLimpo = limparTracking(tracking);
+    if (external_id && data?.id) {
+      const trackingLimpo = limparTracking(tracking || {});
 
       const supabasePayload = {
         external_id,
@@ -204,6 +204,8 @@ app.post('/pix', async (req, res) => {
       } else {
         console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`, savedData);
       }
+    } else {
+      console.warn('⚠️ external_id ou transaction_id ausentes, tracking não salvo no Supabase');
     }
 
     res.status(response.status).json(data);
@@ -262,7 +264,6 @@ app.post('/webhook', async (req, res) => {
   // Atualiza registro no Supabase para manter tracking atualizado (opcional)
   if (data.id) {
     const supabasePayload = {
-      external_id: data.external_id || null,
       transaction_id: data.id,
       ref: trackingSanitizado.ref,
       src: trackingSanitizado.src,
@@ -277,9 +278,14 @@ app.post('/webhook', async (req, res) => {
       tracking: trackingSanitizado
     };
 
+    // Só atualiza external_id se existir para não apagar registro existente
+    if (data.external_id) {
+      supabasePayload.external_id = data.external_id;
+    }
+
     const { error: supabaseError } = await supabase
       .from('trackings')
-      .upsert(supabasePayload, { onConflict: 'transaction_id' });
+      .upsert(supabasePayload, { onConflict: 'external_id' });
 
     if (supabaseError) {
       console.error('❌ Erro ao atualizar tracking no webhook:', supabaseError);
