@@ -15,24 +15,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Função auxiliar para retornar default se valor for null, undefined ou string vazia
-function valorOuDefault(valor, defaultValue) {
-  return valor == null || valor === '' ? defaultValue : valor;
-}
-
-// 🔧 Função para garantir valores padrão no tracking (melhorada)
+// 🔧 Função para garantir valores padrão no tracking
 function limparTracking(tracking) {
   const utm = tracking?.utm || {};
   return {
-    ref: valorOuDefault(tracking?.ref, 'default_ref'),
-    src: valorOuDefault(tracking?.src, 'default_src'),
-    sck: valorOuDefault(tracking?.sck, 'default_sck'),
+    ref: tracking?.ref || 'default_ref',
+    src: tracking?.src || 'default_src',
+    sck: tracking?.sck || 'default_sck',
     utm: {
-      source: valorOuDefault(utm.source, 'default_source'),
-      medium: valorOuDefault(utm.medium, 'default_medium'),
-      campaign: valorOuDefault(utm.campaign, 'default_campaign'),
-      term: valorOuDefault(utm.term, 'default_term'),
-      content: valorOuDefault(utm.content, 'default_content'),
+      source: utm.source || 'default_source',
+      medium: utm.medium || 'default_medium',
+      campaign: utm.campaign || 'default_campaign',
+      term: utm.term || 'default_term',
+      content: utm.content || 'default_content'
     }
   };
 }
@@ -60,6 +55,7 @@ async function enviarEventoFacebook(eventName, data) {
         event_id: data.id,
         user_data: {
           em: data.buyer?.email ? hashSHA256(data.buyer.email) : undefined,
+          // Outros dados podem ser incluídos aqui (telefone, ip, etc)
         },
         custom_data: {
           currency: 'BRL',
@@ -83,11 +79,17 @@ async function enviarEventoFacebook(eventName, data) {
 }
 
 // Endpoint para gerar pagamento Pix
-app.post('/pix', async (req, res) => { 
+app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
 
   try {
     const { external_id, payment_method, amount, buyer, tracking } = req.body;
+
+    if (!external_id) {
+      return res.status(400).json({ error: 'external_id é obrigatório' });
+    }
+
+    const trackingLimpo = limparTracking(tracking);
 
     const payloadRealTech = {
       external_id,
@@ -109,8 +111,8 @@ app.post('/pix', async (req, res) => {
     const data = await response.json();
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
-    if (external_id && tracking && data?.id) {
-      const trackingLimpo = limparTracking(tracking);
+    // Salvar tracking + transaction_id no Supabase
+    if (external_id && data?.id) {
       const { error } = await supabase.from('trackings').upsert({
         external_id,
         transaction_id: data.id,
@@ -139,6 +141,7 @@ app.post('/webhook', async (req, res) => {
 
   let trackingFromDb = null;
 
+  // Tenta buscar tracking pelo external_id
   if (data.external_id) {
     const { data: trackingRow, error } = await supabase
       .from('trackings')
@@ -148,9 +151,13 @@ app.post('/webhook', async (req, res) => {
 
     if (!error && trackingRow) {
       trackingFromDb = trackingRow.tracking;
+      console.log(`🔁 Tracking carregado por external_id:`, trackingFromDb);
+    } else {
+      console.warn('⚠️ Não encontrou tracking para external_id no banco');
     }
   }
 
+  // Se não encontrou pelo external_id, tenta pelo transaction_id (data.id)
   if (!trackingFromDb && data.id) {
     const { data: trackingRowById, error: errorById } = await supabase
       .from('trackings')
@@ -160,13 +167,16 @@ app.post('/webhook', async (req, res) => {
 
     if (!errorById && trackingRowById) {
       trackingFromDb = trackingRowById.tracking;
-      console.log(`🔁 Tracking carregado por ID da transação:`, trackingFromDb);
+      console.log(`🔁 Tracking carregado por transaction_id:`, trackingFromDb);
+    } else {
+      console.warn('⚠️ Não encontrou tracking para transaction_id no banco');
     }
   }
 
   if (trackingFromDb) {
-    data.tracking = trackingFromDb;
-    console.log('✅ Tracking restaurado para o webhook');
+    const trackingLimpo = limparTracking(trackingFromDb);
+    data.tracking = trackingLimpo;
+    console.log('✅ Tracking restaurado e limpo para o webhook');
   } else {
     console.warn('⚠️ Nenhum tracking encontrado para o webhook');
   }
