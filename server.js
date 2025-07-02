@@ -15,19 +15,24 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔧 Função para garantir valores padrão no tracking
+// Função auxiliar para retornar default se valor for null, undefined ou string vazia
+function valorOuDefault(valor, defaultValue) {
+  return valor == null || valor === '' ? defaultValue : valor;
+}
+
+// 🔧 Função para garantir valores padrão no tracking (melhorada)
 function limparTracking(tracking) {
   const utm = tracking?.utm || {};
   return {
-    ref: tracking?.ref || 'default_ref',
-    src: tracking?.src || 'default_src',
-    sck: tracking?.sck || 'default_sck',
+    ref: valorOuDefault(tracking?.ref, 'default_ref'),
+    src: valorOuDefault(tracking?.src, 'default_src'),
+    sck: valorOuDefault(tracking?.sck, 'default_sck'),
     utm: {
-      source: utm.source || 'default_source',
-      medium: utm.medium || 'default_medium',
-      campaign: utm.campaign || 'default_campaign',
-      term: utm.term || 'default_term',
-      content: utm.content || 'default_content'
+      source: valorOuDefault(utm.source, 'default_source'),
+      medium: valorOuDefault(utm.medium, 'default_medium'),
+      campaign: valorOuDefault(utm.campaign, 'default_campaign'),
+      term: valorOuDefault(utm.term, 'default_term'),
+      content: valorOuDefault(utm.content, 'default_content'),
     }
   };
 }
@@ -54,9 +59,7 @@ async function enviarEventoFacebook(eventName, data) {
         action_source: 'website',
         event_id: data.id,
         user_data: {
-          // Hash do e-mail se existir
           em: data.buyer?.email ? hashSHA256(data.buyer.email) : undefined,
-          // Você pode incluir outros dados de user_data se quiser (telefone, ip, etc)
         },
         custom_data: {
           currency: 'BRL',
@@ -64,7 +67,6 @@ async function enviarEventoFacebook(eventName, data) {
         }
       }
     ],
-    // test_event_code: process.env.FB_TEST_EVENT_CODE || undefined // opcional para ambiente de testes
   };
 
   try {
@@ -107,7 +109,6 @@ app.post('/pix', async (req, res) => {
     const data = await response.json();
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
-    // Salvar tracking + transaction_id no Supabase
     if (external_id && tracking && data?.id) {
       const trackingLimpo = limparTracking(tracking);
       const { error } = await supabase.from('trackings').upsert({
@@ -179,7 +180,7 @@ app.post('/webhook', async (req, res) => {
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
     await enviarEventoUtmify(data, 'waiting_payment');
-    await enviarEventoFacebook('InitiateCheckout', data); // Dispara evento InitiateCheckout no Facebook
+    await enviarEventoFacebook('InitiateCheckout', data);
   }
 
   if (event === 'transaction.processed' && data.status === 'paid') {
@@ -189,7 +190,7 @@ app.post('/webhook', async (req, res) => {
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
     await enviarEventoUtmify(data, 'paid');
-    await enviarEventoFacebook('Purchase', data); // Dispara evento Purchase no Facebook
+    await enviarEventoFacebook('Purchase', data);
   }
 
   res.status(200).send('Webhook recebido');
