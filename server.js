@@ -302,7 +302,7 @@ app.post('/webhook', async (req, res) => {
     );
     await enviarEventoUtmify(data, 'paid');
     await enviarEventoFacebook('InitiateCheckout', data);
-  }
+  } 
 
   if (event === 'transaction.processed' && data.status === 'paid') {
     await sendPushcutNotification(
