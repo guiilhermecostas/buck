@@ -78,6 +78,76 @@ async function enviarEventoFacebook(eventName, data) {
   }
 }
 
+// Pushcut notification
+async function sendPushcutNotification(url, title, text) {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, text })
+    });
+    const txt = await response.text();
+    console.log(`🚀 Pushcut: ${response.status} - ${txt}`);
+  } catch (err) {
+    console.error('❌ Erro no Pushcut:', err);
+  }
+}
+
+// Enviar evento para UTMify (usando tracking limpo)
+async function enviarEventoUtmify(data, status) {
+  try {
+    const utm = data.tracking?.utm || {};
+
+    const payload = {
+      orderId: data.id,
+      platform: "checkoutfy",
+      paymentMethod: data.payment_method || 'pix',
+      status: status,
+      createdAt: new Date(data.created_at || Date.now()).toISOString(),
+      approvedDate: new Date().toISOString(),
+      customer: {
+        name: data.buyer?.name || 'Sem nome',
+        email: data.buyer?.email || 'sememail@email.com',
+        phone: data.buyer?.phone || '',
+        document: data.buyer?.document || ''
+      },
+      trackingParameters: {
+        utm_term: utm.term || 'ass',
+        utm_medium: utm.medium || '',
+        utm_source: utm.source || '',
+        utm_content: utm.content || '',
+        utm_campaign: utm.campaign || ''
+      },
+      commission: {
+        totalPriceInCents: data.total_amount || 0,
+        gatewayFeeInCents: 300,
+        userCommissionInCents: data.total_amount || 0
+      },
+      products: [
+        {
+          id: "produto1",
+          name: data.offer?.name || 'Produto',
+          planId: "plano123",
+          planName: "Plano VIP",
+          quantity: data.offer?.quantity || 1,
+          priceInCents: data.total_amount || 0
+        }
+      ]
+    };
+
+    const response = await axios.post("https://api.utmify.com.br/api-credentials/orders", payload, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-token": process.env.UTMIFY_API_KEY
+      }
+    });
+
+    console.log(`✅ Evento ${status} enviado à UTMify:`, response.status);
+  } catch (error) {
+    console.error(`❌ Erro ao enviar evento ${status} para UTMify:`, error.message);
+  }
+}
+
 // Endpoint para gerar pagamento Pix
 app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
@@ -189,6 +259,35 @@ app.post('/webhook', async (req, res) => {
   // Atualiza o data com tracking limpo para uso nos eventos externos
   data.tracking = trackingSanitizado;
 
+  // Atualiza registro no Supabase para manter tracking atualizado (opcional)
+  if (data.id) {
+    const supabasePayload = {
+      external_id: data.external_id || null,
+      transaction_id: data.id,
+      ref: trackingSanitizado.ref,
+      src: trackingSanitizado.src,
+      sck: trackingSanitizado.sck,
+      utm_source: trackingSanitizado.utm.source,
+      utm_campaign: trackingSanitizado.utm.campaign,
+      utm_term: trackingSanitizado.utm.term,
+      utm_content: trackingSanitizado.utm.content,
+      utm_id: trackingSanitizado.utm.id,
+      buyer_name: data.buyer?.name || null,
+      buyer_email: data.buyer?.email || null,
+      tracking: trackingSanitizado
+    };
+
+    const { error: supabaseError } = await supabase
+      .from('trackings')
+      .upsert(supabasePayload, { onConflict: 'transaction_id' });
+
+    if (supabaseError) {
+      console.error('❌ Erro ao atualizar tracking no webhook:', supabaseError);
+    } else {
+      console.log('💾 Tracking atualizado no webhook');
+    }
+  }
+
   const valor = data.total_amount || 0;
 
   if (event === 'transaction.created' && data.status === 'pending') {
@@ -213,75 +312,5 @@ app.post('/webhook', async (req, res) => {
 
   res.status(200).send('Webhook recebido');
 });
-
-// Pushcut notification
-async function sendPushcutNotification(url, title, text) {
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, text })
-    });
-    const txt = await response.text();
-    console.log(`🚀 Pushcut: ${response.status} - ${txt}`);
-  } catch (err) {
-    console.error('❌ Erro no Pushcut:', err);
-  }
-}
-
-// Enviar evento para UTMify (usando tracking limpo)
-async function enviarEventoUtmify(data, status) {
-  try {
-    const utm = data.tracking?.utm || {};
-
-    const payload = {
-      orderId: data.id,
-      platform: "checkoutfy",
-      paymentMethod: data.payment_method || 'pix',
-      status: status,
-      createdAt: new Date(data.created_at || Date.now()).toISOString(),
-      approvedDate: new Date().toISOString(),
-      customer: {
-        name: data.buyer?.name || 'Sem nome',
-        email: data.buyer?.email || 'sememail@email.com',
-        phone: data.buyer?.phone || '',
-        document: data.buyer?.document || ''
-      },
-      trackingParameters: {
-        utm_term: utm.term || 'ass',
-        utm_medium: utm.medium || '',
-        utm_source: utm.source || '',
-        utm_content: utm.content || '',
-        utm_campaign: utm.campaign || ''
-      },
-      commission: {
-        totalPriceInCents: data.total_amount || 0,
-        gatewayFeeInCents: 300,
-        userCommissionInCents: data.total_amount || 0
-      },
-      products: [
-        {
-          id: "produto1",
-          name: data.offer?.name || 'Produto',
-          planId: "plano123",
-          planName: "Plano VIP",
-          quantity: data.offer?.quantity || 1,
-          priceInCents: data.total_amount || 0
-        }
-      ]
-    };
-
-    const response = await axios.post("https://api.utmify.com.br/api-credentials/orders", payload, {
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-token": process.env.UTMIFY_API_KEY
-      }
-    });
-
-    console.log(`✅ Evento ${status} enviado à UTMify:`, response.status);
-  } catch (error) {
-    console.error(`❌ Erro ao enviar evento ${status} para UTMify:`, error.message);
-  }
-}
 
 app.listen(3000, () => console.log('🚀 Servidor rodando em http://localhost:3000'));
