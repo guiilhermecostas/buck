@@ -7,7 +7,6 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-
 const FB_PIXEL_ID = process.env.FB_PIXEL_ID;
 const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
 
@@ -32,12 +31,10 @@ function limparTracking(tracking) {
   };
 }
 
-// Hash SHA256 para e-mail (recomendado pelo Facebook para user_data)
 function hashSHA256(str) {
   return crypto.createHash('sha256').update(str.trim().toLowerCase()).digest('hex');
 }
 
-// Função para enviar evento para Facebook Conversion API
 async function enviarEventoFacebook(eventName, data) {
   if (!FB_PIXEL_ID || !FB_ACCESS_TOKEN) {
     console.warn('⚠️ Facebook Pixel ID ou Access Token não configurados.');
@@ -54,17 +51,14 @@ async function enviarEventoFacebook(eventName, data) {
         action_source: 'website',
         event_id: data.id,
         user_data: {
-          // Hash do e-mail se existir
-          em: data.buyer?.email ? hashSHA256(data.buyer.email) : undefined,
-          // Você pode incluir outros dados de user_data se quiser (telefone, ip, etc)
+          em: data.buyer?.email ? hashSHA256(data.buyer.email) : undefined
         },
         custom_data: {
           currency: 'BRL',
           value: (data.total_amount || 0) / 100
         }
       }
-    ],
-    // test_event_code: process.env.FB_TEST_EVENT_CODE || undefined // opcional para ambiente de testes
+    ]
   };
 
   try {
@@ -81,7 +75,7 @@ async function enviarEventoFacebook(eventName, data) {
 }
 
 // Endpoint para gerar pagamento Pix
-app.post('/pix', async (req, res) => { 
+app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
 
   try {
@@ -120,7 +114,15 @@ app.post('/pix', async (req, res) => {
       else console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`);
     }
 
-    res.status(response.status).json(data);
+    // Formatar a resposta no formato esperado pelo front
+    return res.status(response.status).json({
+      data: {
+        pix: {
+          code: data.code || data.pix?.code,
+          qrcode_base64: data.qrcode_base64 || data.pix?.qrcode_base64
+        }
+      }
+    });
   } catch (err) {
     console.error('❌ Erro no fetch da RealTechDev:', err);
     res.status(500).json({ error: 'Erro ao conectar com a RealTechDev' });
@@ -167,7 +169,8 @@ app.post('/webhook', async (req, res) => {
     data.tracking = trackingFromDb;
     console.log('✅ Tracking restaurado para o webhook');
   } else {
-    console.warn('⚠️ Nenhum tracking encontrado para o webhook');
+    console.warn('⚠️ Nenhum tracking encontrado para o webhook — usando valores padrão');
+    data.tracking = limparTracking(null);
   }
 
   const valor = data.total_amount || 0;
@@ -179,7 +182,7 @@ app.post('/webhook', async (req, res) => {
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
     await enviarEventoUtmify(data, 'waiting_payment');
-    await enviarEventoFacebook('InitiateCheckout', data); // Dispara evento InitiateCheckout no Facebook
+    await enviarEventoFacebook('InitiateCheckout', data);
   }
 
   if (event === 'transaction.processed' && data.status === 'paid') {
@@ -189,13 +192,12 @@ app.post('/webhook', async (req, res) => {
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
     await enviarEventoUtmify(data, 'paid');
-    await enviarEventoFacebook('Purchase', data); // Dispara evento Purchase no Facebook
+    await enviarEventoFacebook('Purchase', data);
   }
 
   res.status(200).send('Webhook recebido');
 });
 
-// Pushcut
 async function sendPushcutNotification(url, title, text) {
   try {
     const response = await fetch(url, {
@@ -210,7 +212,6 @@ async function sendPushcutNotification(url, title, text) {
   }
 }
 
-// UTMify
 async function enviarEventoUtmify(data, status) {
   try {
     const utm = data.tracking?.utm || {};
@@ -266,3 +267,4 @@ async function enviarEventoUtmify(data, status) {
 }
 
 app.listen(3000, () => console.log('🚀 Servidor rodando em http://localhost:3000'));
+ 
