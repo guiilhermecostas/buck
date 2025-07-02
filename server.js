@@ -15,7 +15,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Função para garantir valores padrão no tracking
 function limparTracking(tracking) {
   const utm = tracking?.utm || {};
   return {
@@ -28,17 +27,15 @@ function limparTracking(tracking) {
       campaign: utm.campaign || 'default_campaign',
       id: utm.id || null,
       term: utm.term || 'default_term',
-      content: utm.content || 'default_content'
-    }
+      content: utm.content || 'default_content',
+    },
   };
 }
 
-// Hash SHA256 para e-mail (recomendado pelo Facebook)
 function hashSHA256(str) {
   return crypto.createHash('sha256').update(str.trim().toLowerCase()).digest('hex');
 }
 
-// Envia evento para Facebook Conversion API
 async function enviarEventoFacebook(eventName, data) {
   if (!FB_PIXEL_ID || !FB_ACCESS_TOKEN) {
     console.warn('⚠️ Facebook Pixel ID ou Access Token não configurados.');
@@ -59,9 +56,9 @@ async function enviarEventoFacebook(eventName, data) {
         },
         custom_data: {
           currency: 'BRL',
-          value: (data.total_amount || 0) / 100
-        }
-      }
+          value: (data.total_amount || 0) / 100,
+        },
+      },
     ],
   };
 
@@ -69,7 +66,7 @@ async function enviarEventoFacebook(eventName, data) {
     const response = await fetch(url, {
       method: 'POST',
       body: JSON.stringify(eventData),
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
     const json = await response.json();
     console.log(`✅ Evento Facebook ${eventName} enviado:`, json);
@@ -78,13 +75,12 @@ async function enviarEventoFacebook(eventName, data) {
   }
 }
 
-// Pushcut notification
 async function sendPushcutNotification(url, title, text) {
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, text })
+      body: JSON.stringify({ title, text }),
     });
     const txt = await response.text();
     console.log(`🚀 Pushcut: ${response.status} - ${txt}`);
@@ -93,53 +89,52 @@ async function sendPushcutNotification(url, title, text) {
   }
 }
 
-// Enviar evento para UTMify (usando tracking limpo)
 async function enviarEventoUtmify(data, status) {
   try {
     const utm = data.tracking?.utm || {};
 
     const payload = {
       orderId: data.id,
-      platform: "checkoutfy",
+      platform: 'checkoutfy',
       paymentMethod: data.payment_method || 'pix',
-      status: status,
+      status,
       createdAt: new Date(data.created_at || Date.now()).toISOString(),
       approvedDate: new Date().toISOString(),
       customer: {
         name: data.buyer?.name || 'Sem nome',
         email: data.buyer?.email || 'sememail@email.com',
         phone: data.buyer?.phone || '',
-        document: data.buyer?.document || ''
+        document: data.buyer?.document || '',
       },
       trackingParameters: {
         utm_term: utm.term || 'ass',
         utm_medium: utm.medium || '',
         utm_source: utm.source || '',
         utm_content: utm.content || '',
-        utm_campaign: utm.campaign || ''
+        utm_campaign: utm.campaign || '',
       },
       commission: {
         totalPriceInCents: data.total_amount || 0,
         gatewayFeeInCents: 300,
-        userCommissionInCents: data.total_amount || 0
+        userCommissionInCents: data.total_amount || 0,
       },
       products: [
         {
-          id: "produto1",
+          id: 'produto1',
           name: data.offer?.name || 'Produto',
-          planId: "plano123",
-          planName: "Plano VIP",
+          planId: 'plano123',
+          planName: 'Plano VIP',
           quantity: data.offer?.quantity || 1,
-          priceInCents: data.total_amount || 0
-        }
-      ]
+          priceInCents: data.total_amount || 0,
+        },
+      ],
     };
 
-    const response = await axios.post("https://api.utmify.com.br/api-credentials/orders", payload, {
+    const response = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
       headers: {
-        "Content-Type": "application/json",
-        "x-api-token": process.env.UTMIFY_API_KEY
-      }
+        'Content-Type': 'application/json',
+        'x-api-token': process.env.UTMIFY_API_KEY,
+      },
     });
 
     console.log(`✅ Evento ${status} enviado à UTMify:`, response.status);
@@ -148,7 +143,6 @@ async function enviarEventoUtmify(data, status) {
   }
 }
 
-// Endpoint para gerar pagamento Pix
 app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
 
@@ -159,7 +153,7 @@ app.post('/pix', async (req, res) => {
       external_id,
       payment_method,
       amount,
-      buyer
+      buyer,
     };
 
     const response = await fetch('https://api.realtechdev.com.br/v1/transactions', {
@@ -167,21 +161,20 @@ app.post('/pix', async (req, res) => {
       headers: {
         Authorization: `Bearer ${process.env.REALTECH_API_KEY}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'Buckpay API'
+        'User-Agent': 'Buckpay API',
       },
-      body: JSON.stringify(payloadRealTech)
+      body: JSON.stringify(payloadRealTech),
     });
 
     const data = await response.json();
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
-    // *** Salvando dados no Supabase assim que a transação for criada ***
     if (external_id && data?.id) {
       const trackingLimpo = limparTracking(tracking || {});
 
       const supabasePayload = {
         external_id,
-        transaction_id: data.id,      // transaction_id gerado pela RealTechDev
+        transaction_id: data.id,
         ref: trackingLimpo.ref,
         src: trackingLimpo.src,
         sck: trackingLimpo.sck,
@@ -194,13 +187,13 @@ app.post('/pix', async (req, res) => {
         buyer_email: buyer?.email || null,
         tracking: trackingLimpo,
         status: data.status,
-        amount: amount
+        amount: amount,
       };
 
-      // Use transaction_id como chave única para upsert
+      // Use external_id como chave para upsert — pois webhook pode não ter external_id
       const { error: supabaseError, data: savedData } = await supabase
         .from('trackings')
-        .upsert(supabasePayload, { onConflict: 'transaction_id' });
+        .upsert(supabasePayload, { onConflict: 'external_id' });
 
       if (supabaseError) {
         console.error('❌ Erro ao salvar tracking no Supabase:', supabaseError);
@@ -218,66 +211,86 @@ app.post('/pix', async (req, res) => {
   }
 });
 
-// Webhook atualizado para buscar e atualizar pelo transaction_id
+// webhook para atualizar status e enviar eventos
 app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
 
   const { event, data } = req.body;
   if (!data) return res.status(400).send('Payload inválido');
 
-  console.log('🔍 External ID recebido no webhook:', data.external_id);
-  console.log('🔍 Transaction ID recebido no webhook:', data.id);
-
   let trackingFromDb = null;
+  let registro = null;
 
-  // Sempre busca pelo transaction_id que é garantido pelo webhook
-  if (data.id) {
-    const { data: trackingRowById, error: errorById } = await supabase
+  // Primeiro tente buscar pelo external_id, se houver
+  if (data.external_id) {
+    const { data: registroExtId, error: errExtId } = await supabase
+      .from('trackings')
+      .select('*')
+      .eq('external_id', data.external_id)
+      .single();
+
+    if (!errExtId && registroExtId) {
+      registro = registroExtId;
+      trackingFromDb = registroExtId.tracking;
+      console.log('✅ Tracking encontrado via external_id:', trackingFromDb);
+    }
+  }
+
+  // Se não achou, tente pelo transaction_id
+  if (!registro && data.id) {
+    const { data: registroTransId, error: errTransId } = await supabase
       .from('trackings')
       .select('*')
       .eq('transaction_id', data.id)
       .single();
 
-    if (!errorById && trackingRowById) {
-      trackingFromDb = trackingRowById.tracking;
+    if (!errTransId && registroTransId) {
+      registro = registroTransId;
+      trackingFromDb = registroTransId.tracking;
       console.log('✅ Tracking encontrado via transaction_id:', trackingFromDb);
-
-      // Atualiza o status e dados da transação
-      const trackingLimpo = limparTracking(trackingFromDb || {});
-
-      const supabasePayload = {
-        status: data.status,
-        buyer_name: data.buyer?.name || null,
-        buyer_email: data.buyer?.email || null,
-        ref: trackingLimpo.ref,
-        src: trackingLimpo.src,
-        sck: trackingLimpo.sck,
-        utm_source: trackingLimpo.utm.source,
-        utm_campaign: trackingLimpo.utm.campaign,
-        utm_term: trackingLimpo.utm.term,
-        utm_content: trackingLimpo.utm.content,
-        utm_id: trackingLimpo.utm.id,
-        tracking: trackingLimpo
-      };
-
-      const { error: supabaseError } = await supabase
-        .from('trackings')
-        .update(supabasePayload)
-        .eq('transaction_id', data.id);
-
-      if (supabaseError) {
-        console.error('❌ Erro ao atualizar tracking no webhook:', supabaseError);
-      } else {
-        console.log('💾 Tracking atualizado no webhook');
-      }
-
-      // Atualiza data.tracking para enviar para eventos externos
-      data.tracking = trackingLimpo;
-
-    } else {
-      console.warn('⚠️ Não encontrou tracking para transaction_id no banco');
     }
   }
+
+  if (!registro) {
+    console.warn('⚠️ Não encontrou tracking no banco para atualizar');
+    return res.status(404).send('Tracking não encontrado');
+  }
+
+  const trackingLimpo = limparTracking(trackingFromDb || {});
+
+  // Atualiza registro com status novo, buyer, etc
+  const supabasePayload = {
+    status: data.status, 
+    buyer_name: data.buyer?.name || null,
+    buyer_email: data.buyer?.email || null,
+    ref: trackingLimpo.ref,
+    src: trackingLimpo.src,
+    sck: trackingLimpo.sck,
+    utm_source: trackingLimpo.utm.source,
+    utm_campaign: trackingLimpo.utm.campaign,
+    utm_term: trackingLimpo.utm.term,
+    utm_content: trackingLimpo.utm.content,
+    utm_id: trackingLimpo.utm.id,
+    tracking: trackingLimpo,
+  };
+
+  // Atualiza pelo external_id se disponível, senão pelo transaction_id
+  let updateQuery = supabase.from('trackings').update(supabasePayload);
+  if (registro.external_id) {
+    updateQuery = updateQuery.eq('external_id', registro.external_id);
+  } else {
+    updateQuery = updateQuery.eq('transaction_id', data.id);
+  }
+
+  const { error: updateError } = await updateQuery;
+  if (updateError) {
+    console.error('❌ Erro ao atualizar tracking no webhook:', updateError);
+  } else {
+    console.log('💾 Tracking atualizado no webhook');
+  }
+
+  // Atualiza data.tracking para enviar eventos externos
+  data.tracking = trackingLimpo;
 
   const valor = data.total_amount || 0;
 
