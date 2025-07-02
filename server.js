@@ -175,13 +175,13 @@ app.post('/pix', async (req, res) => {
     const data = await response.json();
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
-    // Salvar tracking + buyer + transaction_id no Supabase
+    // *** Salvando dados no Supabase assim que a transação for criada ***
     if (external_id && data?.id) {
       const trackingLimpo = limparTracking(tracking || {});
 
       const supabasePayload = {
         external_id,
-        transaction_id: data.id,
+        transaction_id: data.id,      // transaction_id gerado pela RealTechDev
         ref: trackingLimpo.ref,
         src: trackingLimpo.src,
         sck: trackingLimpo.sck,
@@ -192,12 +192,15 @@ app.post('/pix', async (req, res) => {
         utm_id: trackingLimpo.utm.id,
         buyer_name: buyer?.name || null,
         buyer_email: buyer?.email || null,
-        tracking: trackingLimpo
+        tracking: trackingLimpo,
+        status: data.status,
+        amount: amount
       };
 
+      // Use transaction_id como chave única para upsert
       const { error: supabaseError, data: savedData } = await supabase
         .from('trackings')
-        .upsert(supabasePayload, { onConflict: 'external_id' });
+        .upsert(supabasePayload, { onConflict: 'transaction_id' });
 
       if (supabaseError) {
         console.error('❌ Erro ao salvar tracking no Supabase:', supabaseError);
@@ -215,7 +218,7 @@ app.post('/pix', async (req, res) => {
   }
 });
 
-// Webhook atualizado com busca pelo external_id ou transaction_id e limpeza do tracking
+// Webhook atualizado para buscar e atualizar pelo transaction_id
 app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
 
@@ -227,20 +230,8 @@ app.post('/webhook', async (req, res) => {
 
   let trackingFromDb = null;
 
-  if (data.external_id) {
-    const { data: trackingRow, error } = await supabase
-      .from('trackings')
-      .select('*')
-      .eq('external_id', data.external_id)
-      .single();
-
-    if (!error && trackingRow) {
-      trackingFromDb = trackingRow.tracking;
-      console.log('✅ Tracking encontrado via external_id:', trackingFromDb);
-    }
-  }
-
-  if (!trackingFromDb && data.id) {
+  // Sempre busca pelo transaction_id que é garantido pelo webhook
+  if (data.id) {
     const { data: trackingRowById, error: errorById } = await supabase
       .from('trackings')
       .select('*')
@@ -250,47 +241,41 @@ app.post('/webhook', async (req, res) => {
     if (!errorById && trackingRowById) {
       trackingFromDb = trackingRowById.tracking;
       console.log('✅ Tracking encontrado via transaction_id:', trackingFromDb);
+
+      // Atualiza o status e dados da transação
+      const trackingLimpo = limparTracking(trackingFromDb || {});
+
+      const supabasePayload = {
+        status: data.status,
+        buyer_name: data.buyer?.name || null,
+        buyer_email: data.buyer?.email || null,
+        ref: trackingLimpo.ref,
+        src: trackingLimpo.src,
+        sck: trackingLimpo.sck,
+        utm_source: trackingLimpo.utm.source,
+        utm_campaign: trackingLimpo.utm.campaign,
+        utm_term: trackingLimpo.utm.term,
+        utm_content: trackingLimpo.utm.content,
+        utm_id: trackingLimpo.utm.id,
+        tracking: trackingLimpo
+      };
+
+      const { error: supabaseError } = await supabase
+        .from('trackings')
+        .update(supabasePayload)
+        .eq('transaction_id', data.id);
+
+      if (supabaseError) {
+        console.error('❌ Erro ao atualizar tracking no webhook:', supabaseError);
+      } else {
+        console.log('💾 Tracking atualizado no webhook');
+      }
+
+      // Atualiza data.tracking para enviar para eventos externos
+      data.tracking = trackingLimpo;
+
     } else {
       console.warn('⚠️ Não encontrou tracking para transaction_id no banco');
-    }
-  }
-
-  // Limpa o tracking para garantir defaults
-  const trackingSanitizado = limparTracking(trackingFromDb || {});
-
-  // Atualiza o data com tracking limpo para uso nos eventos externos
-  data.tracking = trackingSanitizado;
-
-  // Atualiza registro no Supabase para manter tracking atualizado (opcional)
-  if (data.id) {
-    const supabasePayload = {
-      transaction_id: data.id,
-      ref: trackingSanitizado.ref,
-      src: trackingSanitizado.src,
-      sck: trackingSanitizado.sck,
-      utm_source: trackingSanitizado.utm.source,
-      utm_campaign: trackingSanitizado.utm.campaign,
-      utm_term: trackingSanitizado.utm.term,
-      utm_content: trackingSanitizado.utm.content,
-      utm_id: trackingSanitizado.utm.id,
-      buyer_name: data.buyer?.name || null,
-      buyer_email: data.buyer?.email || null,
-      tracking: trackingSanitizado
-    };
-
-    // Só atualiza external_id se existir para não apagar registro existente
-    if (data.external_id) {
-      supabasePayload.external_id = data.external_id;
-    }
-
-    const { error: supabaseError } = await supabase
-      .from('trackings')
-      .upsert(supabasePayload, { onConflict: 'external_id' });
-
-    if (supabaseError) {
-      console.error('❌ Erro ao atualizar tracking no webhook:', supabaseError);
-    } else {
-      console.log('💾 Tracking atualizado no webhook');
     }
   }
 
