@@ -15,7 +15,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔧 Função para garantir valores padrão no tracking
+// Função para garantir valores padrão no tracking
 function limparTracking(tracking) {
   const utm = tracking?.utm || {};
   return {
@@ -32,12 +32,12 @@ function limparTracking(tracking) {
   };
 }
 
-// Hash SHA256 para e-mail (recomendado pelo Facebook para user_data)
+// Hash SHA256 para e-mail (recomendado pelo Facebook)
 function hashSHA256(str) {
   return crypto.createHash('sha256').update(str.trim().toLowerCase()).digest('hex');
 }
 
-// Função para enviar evento para Facebook Conversion API
+// Envia evento para Facebook Conversion API
 async function enviarEventoFacebook(eventName, data) {
   if (!FB_PIXEL_ID || !FB_ACCESS_TOKEN) {
     console.warn('⚠️ Facebook Pixel ID ou Access Token não configurados.');
@@ -55,7 +55,6 @@ async function enviarEventoFacebook(eventName, data) {
         event_id: data.id,
         user_data: {
           em: data.buyer?.email ? hashSHA256(data.buyer.email) : undefined,
-          // Outros dados podem ser incluídos aqui (telefone, ip, etc)
         },
         custom_data: {
           currency: 'BRL',
@@ -85,12 +84,6 @@ app.post('/pix', async (req, res) => {
   try {
     const { external_id, payment_method, amount, buyer, tracking } = req.body;
 
-    if (!external_id) {
-      return res.status(400).json({ error: 'external_id é obrigatório' });
-    }
-
-    const trackingLimpo = limparTracking(tracking);
-
     const payloadRealTech = {
       external_id,
       payment_method,
@@ -112,7 +105,8 @@ app.post('/pix', async (req, res) => {
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
     // Salvar tracking + transaction_id no Supabase
-    if (external_id && data?.id) {
+    if (external_id && tracking && data?.id) {
+      const trackingLimpo = limparTracking(tracking);
       const { error } = await supabase.from('trackings').upsert({
         external_id,
         transaction_id: data.id,
@@ -130,7 +124,7 @@ app.post('/pix', async (req, res) => {
   }
 });
 
-// Webhook
+// Webhook atualizado com busca pelo external_id ou transaction_id e limpeza do tracking
 app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
 
@@ -138,10 +132,10 @@ app.post('/webhook', async (req, res) => {
   if (!data) return res.status(400).send('Payload inválido');
 
   console.log('🔍 External ID recebido no webhook:', data.external_id);
+  console.log('🔍 Transaction ID recebido no webhook:', data.id);
 
   let trackingFromDb = null;
 
-  // Tenta buscar tracking pelo external_id
   if (data.external_id) {
     const { data: trackingRow, error } = await supabase
       .from('trackings')
@@ -151,13 +145,10 @@ app.post('/webhook', async (req, res) => {
 
     if (!error && trackingRow) {
       trackingFromDb = trackingRow.tracking;
-      console.log(`🔁 Tracking carregado por external_id:`, trackingFromDb);
-    } else {
-      console.warn('⚠️ Não encontrou tracking para external_id no banco');
+      console.log('✅ Tracking encontrado via external_id:', trackingFromDb);
     }
   }
 
-  // Se não encontrou pelo external_id, tenta pelo transaction_id (data.id)
   if (!trackingFromDb && data.id) {
     const { data: trackingRowById, error: errorById } = await supabase
       .from('trackings')
@@ -167,19 +158,17 @@ app.post('/webhook', async (req, res) => {
 
     if (!errorById && trackingRowById) {
       trackingFromDb = trackingRowById.tracking;
-      console.log(`🔁 Tracking carregado por transaction_id:`, trackingFromDb);
+      console.log('✅ Tracking encontrado via transaction_id:', trackingFromDb);
     } else {
       console.warn('⚠️ Não encontrou tracking para transaction_id no banco');
     }
   }
 
-  if (trackingFromDb) {
-    const trackingLimpo = limparTracking(trackingFromDb);
-    data.tracking = trackingLimpo;
-    console.log('✅ Tracking restaurado e limpo para o webhook');
-  } else {
-    console.warn('⚠️ Nenhum tracking encontrado para o webhook');
-  }
+  // Limpa o tracking para garantir defaults
+  const trackingSanitizado = limparTracking(trackingFromDb || {});
+
+  // Atualiza o data com tracking limpo para uso nos eventos externos
+  data.tracking = trackingSanitizado;
 
   const valor = data.total_amount || 0;
 
@@ -206,7 +195,7 @@ app.post('/webhook', async (req, res) => {
   res.status(200).send('Webhook recebido');
 });
 
-// Pushcut
+// Pushcut notification
 async function sendPushcutNotification(url, title, text) {
   try {
     const response = await fetch(url, {
@@ -221,7 +210,7 @@ async function sendPushcutNotification(url, title, text) {
   }
 }
 
-// UTMify
+// Enviar evento para UTMify (usando tracking limpo)
 async function enviarEventoUtmify(data, status) {
   try {
     const utm = data.tracking?.utm || {};
@@ -240,7 +229,7 @@ async function enviarEventoUtmify(data, status) {
         document: data.buyer?.document || ''
       },
       trackingParameters: {
-        utm_term: utm.term || '',
+        utm_term: utm.term || 'ass',
         utm_medium: utm.medium || '',
         utm_source: utm.source || '',
         utm_content: utm.content || '',
