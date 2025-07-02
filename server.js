@@ -98,7 +98,7 @@ app.post('/pix', async (req, res) => {
         'Content-Type': 'application/json',
         'User-Agent': 'Buckpay API'
       },
-      body: JSON.stringify(payloadRealTech) 
+      body: JSON.stringify(payloadRealTech)
     }); 
 
     const data = await response.json();
@@ -230,10 +230,10 @@ async function enviarEventoUtmify(data, status) {
       },
       trackingParameters: {
         utm_term: utm.term || 'ass',
-        utm_medium: utm.medium || '',
-        utm_source: utm.source || '',
-        utm_content: utm.content || '',
-        utm_campaign: utm.campaign || ''
+        utm_medium: utm.medium || 'asd',
+        utm_source: utm.source || 'asd',
+        utm_content: utm.content || 'asd',
+        utm_campaign: utm.campaign || 'asd'
       },
       commission: {
         totalPriceInCents: data.total_amount || 0,
