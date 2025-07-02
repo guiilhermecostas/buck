@@ -26,6 +26,7 @@ function limparTracking(tracking) {
       source: utm.source || 'default_source',
       medium: utm.medium || 'default_medium',
       campaign: utm.campaign || 'default_campaign',
+      id: utm.id || null,
       term: utm.term || 'default_term',
       content: utm.content || 'default_content'
     }
@@ -99,22 +100,40 @@ app.post('/pix', async (req, res) => {
         'User-Agent': 'Buckpay API'
       },
       body: JSON.stringify(payloadRealTech)
-    }); 
+    });
 
     const data = await response.json();
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
-    // Salvar tracking + transaction_id no Supabase
+    // Salvar tracking + buyer + transaction_id no Supabase
     if (external_id && tracking && data?.id) {
       const trackingLimpo = limparTracking(tracking);
-      const { error } = await supabase.from('trackings').upsert({
+
+      const supabasePayload = {
         external_id,
         transaction_id: data.id,
+        ref: trackingLimpo.ref,
+        src: trackingLimpo.src,
+        sck: trackingLimpo.sck,
+        utm_source: trackingLimpo.utm.source,
+        utm_campaign: trackingLimpo.utm.campaign,
+        utm_term: trackingLimpo.utm.term,
+        utm_content: trackingLimpo.utm.content,
+        utm_id: trackingLimpo.utm.id,
+        buyer_name: buyer?.name || null,
+        buyer_email: buyer?.email || null,
         tracking: trackingLimpo
-      });
+      };
 
-      if (error) console.error('❌ Erro ao salvar tracking no Supabase:', error);
-      else console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`);
+      const { error: supabaseError, data: savedData } = await supabase
+        .from('trackings')
+        .upsert(supabasePayload, { onConflict: 'external_id' });
+
+      if (supabaseError) {
+        console.error('❌ Erro ao salvar tracking no Supabase:', supabaseError);
+      } else {
+        console.log(`💾 Tracking salvo no Supabase para external_id ${external_id}`, savedData);
+      }
     }
 
     res.status(response.status).json(data);
@@ -139,7 +158,7 @@ app.post('/webhook', async (req, res) => {
   if (data.external_id) {
     const { data: trackingRow, error } = await supabase
       .from('trackings')
-      .select('tracking')
+      .select('*')
       .eq('external_id', data.external_id)
       .single();
 
@@ -152,7 +171,7 @@ app.post('/webhook', async (req, res) => {
   if (!trackingFromDb && data.id) {
     const { data: trackingRowById, error: errorById } = await supabase
       .from('trackings')
-      .select('tracking')
+      .select('*')
       .eq('transaction_id', data.id)
       .single();
 
@@ -230,10 +249,10 @@ async function enviarEventoUtmify(data, status) {
       },
       trackingParameters: {
         utm_term: utm.term || 'ass',
-        utm_medium: utm.medium || 'asd',
-        utm_source: utm.source || 'asd',
-        utm_content: utm.content || 'asd',
-        utm_campaign: utm.campaign || 'asd'
+        utm_medium: utm.medium || '',
+        utm_source: utm.source || '',
+        utm_content: utm.content || '',
+        utm_campaign: utm.campaign || ''
       },
       commission: {
         totalPriceInCents: data.total_amount || 0,
