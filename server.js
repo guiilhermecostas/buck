@@ -175,13 +175,12 @@ app.post('/pix', async (req, res) => {
     const data = await response.json();
     console.log('✅ Resposta da RealTechDev:', response.status, data);
 
-    // Salvar tracking + buyer + transaction_id no Supabase
-    if (external_id && data?.id) {
+    if (external_id && data?.data?.id) {
       const trackingLimpo = limparTracking(tracking || {});
 
       const supabasePayload = {
         external_id,
-        transaction_id: data.id,
+        transaction_id: data.data.id,
         ref: trackingLimpo.ref,
         src: trackingLimpo.src,
         sck: trackingLimpo.sck,
