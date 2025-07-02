@@ -301,9 +301,9 @@ app.post('/webhook', async (req, res) => {
       'Pagamento criado',
       `ID: ${data.id} | Valor: R$ ${(valor / 100).toFixed(2)}`
     );
-    await enviarEventoUtmify(data, 'paid');
+    await enviarEventoUtmify(data, 'waiting-payment');
     await enviarEventoFacebook('InitiateCheckout', data);
-  }
+  } 
 
   if (event === 'transaction.processed' && data.status === 'paid') {
     await sendPushcutNotification(
