@@ -198,17 +198,17 @@ app.post('/pix', async (req, res) => {
         src: trackingLimpo.src,
         sck: trackingLimpo.sck,
         utm_source: trackingLimpo.utm.source,
-        utm_campaign: trackingLimpo.utm.campaign,
+        utm_campaign: trackingLimpo.utm.campaign, 
         utm_term: trackingLimpo.utm.term,
         utm_content: trackingLimpo.utm.content,
         utm_id: trackingLimpo.utm.id,
         buyer_name: buyer?.name || null,
         buyer_email: buyer?.email || null,
         tracking: trackingLimpo,
-        fbp,
-        fbc,
-        user_agent
-      };          
+        fbp: fbp || null,
+        fbc: fbc || null,
+        user_agent: user_agent || null
+      };         
 
       const { error: supabaseError, data: savedData } = await supabase
         .from('trackings')
