@@ -46,27 +46,40 @@ async function enviarEventoFacebook(eventName, data) {
   }
 
   const url = `https://graph.facebook.com/v17.0/${FB_PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
+  const utm = data.tracking?.utm || {};
 
   const eventData = {
     data: [
       {
         event_name: eventName,
         event_time: Math.floor(Date.now() / 1000),
-        action_source: 'website',
         event_id: data.id,
+        action_source: 'website',
+        event_source_url: data.tracking?.src || 'https://seudominio.com',
         user_data: {
           em: data.buyer?.email ? hashSHA256(data.buyer.email) : undefined,
+          fn: data.buyer?.name ? hashSHA256(data.buyer.name.split(' ')[0]) : undefined,
+          ln: data.buyer?.name ? hashSHA256(data.buyer.name.split(' ').slice(1).join(' ')) : undefined,
+          ph: data.buyer?.phone ? hashSHA256(data.buyer.phone) : undefined,
+          fbp: data.fbp || null,
+          fbc: data.fbc || null,
+          client_user_agent: data.user_agent || null,
+          client_ip_address: data.client_ip || null
         },
         custom_data: {
           currency: 'BRL',
-          value: (data.total_amount || 0) / 100
+          value: (data.total_amount || 0) / 100,
+          content_name: data.offer?.name || 'Doação',
+          content_category: utm.campaign || 'ajudeana',
+          content_type: 'product',
+          order_id: data.id
         }
       }
-    ],
+    ]
   };
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(url, { 
       method: 'POST',
       body: JSON.stringify(eventData),
       headers: { 'Content-Type': 'application/json' }
@@ -153,7 +166,7 @@ app.post('/pix', async (req, res) => {
   console.log('📦 Body recebido do front:', req.body);
 
   try {
-    const { external_id, payment_method, amount, buyer, tracking } = req.body;
+    const { external_id, payment_method, amount, buyer, tracking, fbc, fbp, user_agent } = req.body;
 
     const payloadRealTech = {
       external_id,
@@ -191,8 +204,11 @@ app.post('/pix', async (req, res) => {
         utm_id: trackingLimpo.utm.id,
         buyer_name: buyer?.name || null,
         buyer_email: buyer?.email || null,
-        tracking: trackingLimpo
-      };
+        tracking: trackingLimpo,
+        fbp,
+        fbc,
+        user_agent
+      };          
 
       const { error: supabaseError, data: savedData } = await supabase
         .from('trackings')
@@ -245,14 +261,15 @@ app.post('/webhook', async (req, res) => {
       .select('*')
       .eq('transaction_id', data.id)
       .single();
-
+  
     if (!errorById && trackingRowById) {
       trackingFromDb = trackingRowById.tracking;
+      data.fbp = trackingRowById.fbp || null;
+      data.fbc = trackingRowById.fbc || null;
+      data.user_agent = trackingRowById.user_agent || null;
       console.log('✅ Tracking encontrado via transaction_id:', trackingFromDb);
-    } else {
-      console.warn('⚠️ Não encontrou tracking para transaction_id no banco');
     }
-  }
+  }  
 
   // Limpa o tracking para garantir defaults
   const trackingSanitizado = limparTracking(trackingFromDb || {});
